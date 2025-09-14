@@ -32,5 +32,6 @@ const userSchema = new mongoose.Schema({
 });
 
 // Indexes for performance (removed duplicates since unique: true already creates indexes)
+const User = mongoose.models.User || mongoose.model('User', userSchema);
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = User;
