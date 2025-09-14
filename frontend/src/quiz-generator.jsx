@@ -5,42 +5,97 @@ import { Brain, FileText, CheckCircle } from "lucide-react"
 import { Card } from "./components/ui/card"
 import { Progress } from "./components/ui/progress"
 import Button from "./components/ui/button"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
+import apiService from "./lib/api"
 
-export function QuizGenerator({ isGenerating, settings }) {
+export function QuizGenerator({ isGenerating, settings, documentId, onQuizGenerated }) {
   const [progress, setProgress] = useState(0)
   const [currentStep, setCurrentStep] = useState("")
   const [generatedQuestions, setGeneratedQuestions] = useState([])
+  const [quizId, setQuizId] = useState(null)
+  const [error, setError] = useState(null)
+  const router = useRouter()
 
   useEffect(() => {
-    if (isGenerating) {
+    if (isGenerating && documentId) {
+      generateQuizFromBackend()
+    }
+  }, [isGenerating, documentId, settings])
+
+  const generateQuizFromBackend = async () => {
+    try {
       setProgress(0)
       setGeneratedQuestions([])
+      setError(null)
+      setCurrentStep("Starting quiz generation...")
 
-      const steps = [
-        { step: "Analyzing PDF content...", duration: 800 },
-        { step: "Extracting key concepts...", duration: 600 },
-        { step: "Generating questions...", duration: 1000 },
-        { step: "Optimizing difficulty...", duration: 400 },
-        { step: "Finalizing quiz...", duration: 200 },
-      ]
+      // Call backend to generate quiz
+      const response = await apiService.generateQuiz(documentId, settings)
+      const newQuizId = response.quizId
+      setQuizId(newQuizId)
 
-      let currentProgress = 0
-      steps.forEach((stepInfo, index) => {
-        setTimeout(() => {
-          setCurrentStep(stepInfo.step)
-          setProgress(((index + 1) / steps.length) * 100)
+      // Poll for progress
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await apiService.getQuizStatus(newQuizId)
+          
+          setProgress(statusResponse.progress || 0)
+          setCurrentStep(statusResponse.message || "Processing...")
 
-          if (index === steps.length - 1) {
-            setTimeout(() => {
-              setGeneratedQuestions(generateMockQuestions(settings))
-            }, 200)
+          if (statusResponse.status === 'ready') {
+            clearInterval(pollInterval)
+            
+            // Get the completed quiz
+            const quizResponse = await apiService.getQuiz(newQuizId)
+            setGeneratedQuestions(quizResponse.quiz.questions)
+            
+            if (onQuizGenerated) {
+              onQuizGenerated(quizResponse.quiz)
+            }
+          } else if (statusResponse.status === 'failed') {
+            clearInterval(pollInterval)
+            setError('Quiz generation failed. Please try again.')
           }
-        }, currentProgress)
-        currentProgress += stepInfo.duration
-      })
+        } catch (error) {
+          console.error('Error polling quiz status:', error)
+          clearInterval(pollInterval)
+          setError('Failed to check quiz status')
+        }
+      }, 2000) // Poll every 2 seconds
+
+    } catch (error) {
+      console.error('Error generating quiz:', error)
+      setError('Failed to start quiz generation')
+      
+      // Fallback to mock data for demo
+      setTimeout(() => {
+        setGeneratedQuestions(generateMockQuestions(settings))
+        setProgress(100)
+        setCurrentStep("Quiz generation complete (demo mode)")
+      }, 2000)
     }
-  }, [isGenerating, settings])
+  }
+
+  const handleStartQuiz = async () => {
+    if (quizId) {
+      try {
+        // Start a quiz session
+        const sessionResponse = await apiService.startQuizSession(quizId)
+        
+        // Navigate to quiz interface with session ID
+        router.push(`/quiz/${quizId}?sessionId=${sessionResponse.sessionId}`)
+      } catch (error) {
+        console.error('Error starting quiz:', error)
+        // Fallback to static route for demo
+        router.push(`/quiz/${quizId}`)
+      }
+    }
+  }
+
+  const handlePreviewQuestions = () => {
+    // Show questions preview (could be a modal or separate page)
+    console.log('Preview questions:', generatedQuestions)
+  }
 
   const generateMockQuestions = (settings) => {
     const mockQuestions = [
@@ -97,6 +152,12 @@ export function QuizGenerator({ isGenerating, settings }) {
           <h3 className="text-2xl font-semibold mb-4 text-white">Generating Your Quiz</h3>
           <p className="text-zinc-400 mb-8">{currentStep}</p>
 
+          {error && (
+            <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg">
+              <p className="text-red-300 text-sm">{error}</p>
+            </div>
+          )}
+
           <div className="max-w-md mx-auto">
             <Progress value={progress} className="mb-4" />
             <p className="text-sm text-zinc-500">{Math.round(progress)}% complete</p>
@@ -143,10 +204,17 @@ export function QuizGenerator({ isGenerating, settings }) {
         </div>
 
         <div className="flex gap-3 mt-6">
-          <Link href="/quiz/ml-basics" className="flex-1">
-            <Button className="w-full bg-white text-black hover:bg-zinc-200">Start Quiz</Button>
-          </Link>
-          <Button variant="outline" className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 bg-transparent">
+          <Button 
+            className="flex-1 bg-white text-black hover:bg-zinc-200"
+            onClick={() => handleStartQuiz()}
+          >
+            Start Quiz
+          </Button>
+          <Button 
+            variant="outline" 
+            className="border-zinc-700 text-zinc-300 hover:bg-zinc-800 bg-transparent"
+            onClick={() => handlePreviewQuestions()}
+          >
             Preview Questions
           </Button>
         </div>
